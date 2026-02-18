@@ -186,7 +186,27 @@ function looksLikeAnalyte(value: string): boolean {
   if (/Monsternummer|Debiteurnummer|Datum ontvangst|Datum verslag|Soort monster|Cysteaaltjes|besmettingsgraad|AALTJES ANALYSE|IBAN|BIC/i.test(value)) {
     return false;
   }
+  if (value.includes(':') || isDateLikeLabel(value) || isAddressLikeLabel(value)) {
+    return false;
+  }
+
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) {
+    return false;
+  }
+
   return /[A-Za-z]/.test(value);
+}
+
+function isDateLikeLabel(value: string): boolean {
+  const normalized = value.toLowerCase().trim();
+  const monthNames = Object.keys(MONTHS).join('|');
+  return new RegExp(`^\\d{1,2}\\s+(?:${monthNames})$`, 'i').test(normalized);
+}
+
+function isAddressLikeLabel(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return /\b(laan|straat|weg|dijk|kade|plein|steeg|hof|gracht|buurt|wijk|postcode)\b/.test(normalized);
 }
 
 function isNoiseLine(line: string): boolean {

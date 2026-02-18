@@ -73,9 +73,12 @@ export function parseHlbAaltjesText(text: string): ParsedDocument {
 
   // fallback op hele content als key/value op één regel slecht ge-OCRd is
   sample.sampleNumber ||= firstCapture(content, [/Monsternummer\s*:?\s*(\d{5,})/i]);
-  sample.pdfFieldName ||= firstCapture(content, [/Perceel\s*:?\s*([^\n]+)/i])?.split(' Datum')[0].trim();
-  sample.receivedDate ||= firstCapture(content, [/Datum ontvangst\s*:?\s*([^\n]+)/i]);
-  sample.reportDate ||= firstCapture(content, [/Datum verslag\s*:?\s*([^\n]+)/i]);
+  if (sample.pdfFieldName && !looksLikeFieldName(sample.pdfFieldName)) sample.pdfFieldName = undefined;
+  sample.pdfFieldName ||= extractFieldNameFromContent(content);
+
+  const orderedDates = extractOrderedDutchDates(content);
+  if (!sample.receivedDate && orderedDates[0]) sample.receivedDate = orderedDates[0];
+  if (!sample.reportDate && orderedDates[1]) sample.reportDate = orderedDates[1];
 
   sample.measurements = extractMeasurementRows(lines);
   sample.cystResult = extractCyst(lines);
@@ -120,6 +123,43 @@ function firstCapture(input: string, patterns: RegExp[]): string | undefined {
   return undefined;
 }
 
+function extractFieldNameFromContent(content: string): string | undefined {
+  const fromPerceel = firstCapture(content, [
+    /Perceel\s*:?\s*([^\n]*?)(?=\s+Monsternummer|\s+Datum ontvangst|\s+Datum verslag|\n|$)/i,
+    /Perceel\s*:?\s*([^\n]+)/i
+  ]);
+  if (fromPerceel && looksLikeFieldName(fromPerceel)) {
+    return fromPerceel.split(' Datum')[0].trim();
+  }
+
+  const fromDebiteurLine = firstCapture(content, [/Debiteurnummer\s*:?\s*\n\s*([^\n]+)/i]);
+  if (fromDebiteurLine && looksLikeFieldName(fromDebiteurLine)) {
+    return fromDebiteurLine;
+  }
+
+  return undefined;
+}
+
+function looksLikeFieldName(value: string): boolean {
+  if (!value) return false;
+  if (/^(Vrijlevende|AALTJES ANALYSE|Analysemethode|Perceel|Monsternummer)/i.test(value)) {
+    return false;
+  }
+  if (/(Monsternummer|Datum ontvangst|Datum verslag|Soort monster|Debiteurnummer)/i.test(value)) {
+    return false;
+  }
+  if (/^\d+\s*[A-Za-z]/.test(value)) {
+    return false;
+  }
+  return /[A-Za-z]/.test(value);
+}
+
+function extractOrderedDutchDates(content: string): string[] {
+  const monthNames = Object.keys(MONTHS).join('|');
+  const matches = content.match(new RegExp(`\\b\\d{1,2}\\s+(?:${monthNames})\\s+\\d{4}\\b`, 'gi')) ?? [];
+  return Array.from(new Set(matches.map((m) => m.trim())));
+}
+
 function extractMeasurementRows(lines: string[]): ParsedMeasurement[] {
   const out: ParsedMeasurement[] = [];
   const seen = new Set<string>();
@@ -161,6 +201,22 @@ function extractMeasurementRows(lines: string[]): ParsedMeasurement[] {
           category: currentCategory
         });
         i += 1;
+        continue;
+      }
+    }
+
+    // Case C: analyte over twee regels + waarde op regel i+2 (bijv. "Tylenchorhynchus" + "spp." + "300")
+    if (i + 2 < lines.length && looksLikeContinuation(lines[i + 1])) {
+      const joinedAnalyte = cleanAnalyteName(`${line} ${lines[i + 1]}`);
+      const valueOnly = lines[i + 2].match(/^(\d+(?:[\.,]\d+)?)\s*(\*{0,2})$/);
+      if (looksLikeAnalyte(joinedAnalyte) && valueOnly) {
+        pushMeasurement(out, seen, {
+          analyteKey: joinedAnalyte,
+          value: parseNumeric(valueOnly[1]),
+          unit: 'aantal per 100 gram grond',
+          category: currentCategory
+        });
+        i += 2;
       }
     }
   }
@@ -186,7 +242,32 @@ function looksLikeAnalyte(value: string): boolean {
   if (/Monsternummer|Debiteurnummer|Datum ontvangst|Datum verslag|Soort monster|Cysteaaltjes|besmettingsgraad|AALTJES ANALYSE|IBAN|BIC/i.test(value)) {
     return false;
   }
+  if (value.includes(':') || isDateLikeLabel(value) || isAddressLikeLabel(value)) {
+    return false;
+  }
+
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) {
+    return false;
+  }
+
   return /[A-Za-z]/.test(value);
+}
+
+function looksLikeContinuation(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return /^(spp\.?|cf\.?|sp\.?|species)$/.test(normalized);
+}
+
+function isDateLikeLabel(value: string): boolean {
+  const normalized = value.toLowerCase().trim();
+  const monthNames = Object.keys(MONTHS).join('|');
+  return new RegExp(`^\\d{1,2}\\s+(?:${monthNames})$`, 'i').test(normalized);
+}
+
+function isAddressLikeLabel(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return /\b(laan|straat|weg|dijk|kade|plein|steeg|hof|gracht|buurt|wijk|postcode)\b/.test(normalized);
 }
 
 function isNoiseLine(line: string): boolean {

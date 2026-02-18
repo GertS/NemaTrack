@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Field {
+  id        Int          @id @default(autoincrement())
+  name      String       @unique
+  notes     String?
+  aliases   FieldAlias[]
+  samples   Sample[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model FieldAlias {
+  id        Int      @id @default(autoincrement())
+  aliasName String
+  fieldId   Int
+  field     Field    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([aliasName, fieldId])
+}
+
+model Document {
+  id               Int      @id @default(autoincrement())
+  originalFilename String
+  uploadedAt       DateTime @default(now())
+  pdfText          String?
+  extractedJson    String
+  labName          String?
+  samples          Sample[]
+}
+
+model Sample {
+  id            Int          @id @default(autoincrement())
+  documentId    Int
+  sampleNumber  String?
+  pdfFieldName  String?
+  receivedDate  DateTime?
+  reportDate    DateTime?
+  linkedFieldId Int?
+  document      Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  linkedField   Field?       @relation(fields: [linkedFieldId], references: [id], onDelete: SetNull)
+  measurements  Measurement[]
+  cystResult    CystResult?
+}
+
+model Measurement {
+  id         Int     @id @default(autoincrement())
+  sampleId   Int
+  analyteKey String
+  value      Float
+  unit       String
+  category   String?
+  sample     Sample  @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+}
+
+model CystResult {
+  id               Int    @id @default(autoincrement())
+  sampleId         Int    @unique
+  cystCount        Int?
+  lleCount         Int?
+  infestationGrade String?
+  sample           Sample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+}

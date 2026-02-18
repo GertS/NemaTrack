@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/prisma';
-import { addAlias, createField } from './actions';
+import { addAlias, createField, deleteAlias, deleteField } from './actions';
 
 export default async function FieldsPage() {
   const fields = await prisma.field.findMany({ include: { aliases: true }, orderBy: { name: 'asc' } });
@@ -38,7 +38,8 @@ export default async function FieldsPage() {
               <th>Field</th>
               <th>Notities</th>
               <th>Aliassen</th>
-              <th></th>
+              <th>Open</th>
+              <th>Actie</th>
             </tr>
           </thead>
           <tbody>
@@ -46,8 +47,21 @@ export default async function FieldsPage() {
               <tr key={field.id}>
                 <td>{field.name}</td>
                 <td>{field.notes ?? '-'}</td>
-                <td>{field.aliases.map((a) => a.aliasName).join(', ') || '-'}</td>
+                <td>
+                  {field.aliases.length ? field.aliases.map((a) => (
+                    <form key={a.id} action={deleteAlias} style={{ display: 'inline-flex', marginRight: '0.35rem' }}>
+                      <input type="hidden" name="aliasId" value={a.id} />
+                      <button type="submit" className="secondary" title="Alias verwijderen">{a.aliasName} ✕</button>
+                    </form>
+                  )) : '-'}
+                </td>
                 <td><Link href={`/field/${field.id}`}>Open</Link></td>
+                <td>
+                  <form action={deleteField}>
+                    <input type="hidden" name="fieldId" value={field.id} />
+                    <button type="submit" className="secondary">Field verwijderen</button>
+                  </form>
+                </td>
               </tr>
             ))}
           </tbody>

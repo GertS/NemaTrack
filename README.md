@@ -11,11 +11,11 @@ NemaTrack is een Next.js MVP voor het beheren en visualiseren van laboratoriumui
 - Vitest voor parser unit tests
 
 ## Features (MVP)
-- `/fields`: CRUD-light voor canonieke fields + field aliases
+- `/fields`: toevoegen + verwijderen van canonieke fields en aliases
 - `/upload`: upload PDF, parser review, handmatige koppeling naar canoniek field
 - `/field/[id]`: tijdreeksvisualisatie per analyte + meetpuntentabel
-- `/documents/[id]`: documentdetails + extracted JSON
-- Best effort parser die ontbrekende velden tolereert en warnings geeft
+- `/documents/[id]`: documentdetails + extracted JSON + verwijderen document
+- Best effort parser die ontbrekende velden tolereert en warnings geeft (incl. OCR split-lines)
 - Fallback demo data wanneer PDF extractie mislukt
 
 ## Installatie

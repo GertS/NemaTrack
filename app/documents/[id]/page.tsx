@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
+import { deleteDocument } from './actions';
 
 export default async function DocumentPage({ params }: { params: { id: string } }) {
   const id = Number(params.id);
@@ -26,6 +27,10 @@ export default async function DocumentPage({ params }: { params: { id: string } 
         <p>Bestandsnaam: {document.originalFilename}</p>
         <p>Lab: {document.labName ?? '-'}</p>
         <p>Geüpload: {document.uploadedAt.toISOString()}</p>
+        <form action={deleteDocument}>
+          <input type="hidden" name="documentId" value={document.id} />
+          <button type="submit" className="secondary">Document verwijderen</button>
+        </form>
       </section>
 
       {document.samples.map((sample) => (

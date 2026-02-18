@@ -22,6 +22,19 @@ describe('parseHlbAaltjesText', () => {
     expect(out.samples[0].measurements.some((m) => m.analyteKey.includes('Pratylenchus penetrans'))).toBe(true);
   });
 
+  it('parses OCR split lines where values are on next line', () => {
+    const out = parseHlbAaltjesText(fixture('hlb-ocr-split.txt'));
+    expect(out.samples[0].measurements.some((m) => m.analyteKey === 'Pratylenchus penetrans' && m.value === 245)).toBe(true);
+    expect(out.samples[0].measurements.some((m) => m.analyteKey === 'Meloidogyne hapla' && m.value === 31)).toBe(true);
+  });
+
+  it('parses key/value metadata from dense inline OCR text', () => {
+    const out = parseHlbAaltjesText(fixture('hlb-inline-mixed.txt'));
+    expect(out.samples[0].sampleNumber).toBe('2309991001');
+    expect(out.samples[0].pdfFieldName).toContain('H1');
+    expect(out.samples[0].reportDate).toContain('22 maart 2023');
+  });
+
   it('best effort on incomplete text without crashing', () => {
     const out = parseHlbAaltjesText(fixture('hlb-edge-case.txt'));
     expect(out.samples).toHaveLength(1);

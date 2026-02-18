@@ -29,3 +29,19 @@ export async function addAlias(formData: FormData) {
 
   revalidatePath('/fields');
 }
+
+export async function deleteField(formData: FormData) {
+  const fieldId = Number(formData.get('fieldId'));
+  if (!fieldId) return;
+
+  await prisma.field.delete({ where: { id: fieldId } });
+  revalidatePath('/fields');
+}
+
+export async function deleteAlias(formData: FormData) {
+  const aliasId = Number(formData.get('aliasId'));
+  if (!aliasId) return;
+
+  await prisma.fieldAlias.delete({ where: { id: aliasId } });
+  revalidatePath('/fields');
+}

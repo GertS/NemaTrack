@@ -39,9 +39,19 @@ const MONTHS: Record<string, number> = {
   december: 11
 };
 
+const CATEGORY_WORDS = [
+  'Vrijlevende aaltjes',
+  'Wortellesieaaltjes',
+  'Wortelknobbelaaltjes',
+  'Vrijlevende wortelaaltjes',
+  'Stengelaaltjes',
+  'Overige plantparasitaire aaltjes',
+  'Niet plantparasitaire aaltjes'
+];
+
 export function parseDutchDate(value?: string): Date | undefined {
   if (!value) return undefined;
-  const match = value.trim().toLowerCase().match(/(\d{1,2})\s+([a-z]+)\s+(\d{4})/);
+  const match = value.trim().toLowerCase().match(/(\d{1,2})\s+([a-zé]+)\s+(\d{4})/);
   if (!match) return undefined;
   const month = MONTHS[match[2]];
   if (month === undefined) return undefined;
@@ -50,48 +60,59 @@ export function parseDutchDate(value?: string): Date | undefined {
 }
 
 export function parseHlbAaltjesText(text: string): ParsedDocument {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
+  const lines = normalizeLines(text);
+  const content = lines.join('\n');
+
+  const sample: ParsedSample = {
+    sampleNumber: extractSimpleValue(lines, /^Monsternummer\s*:?\s*(.+)$/i, /(\d{5,})/),
+    pdfFieldName: extractSimpleValue(lines, /^Perceel\s*:?\s*(.+)$/i),
+    receivedDate: extractSimpleValue(lines, /^Datum ontvangst\s*:?\s*(.+)$/i, /(\d{1,2}\s+[a-zé]+\s+\d{4})/i),
+    reportDate: extractSimpleValue(lines, /^Datum verslag\s*:?\s*(.+)$/i, /(\d{1,2}\s+[a-zé]+\s+\d{4})/i),
+    measurements: []
+  };
+
+  // fallback op hele content als key/value op één regel slecht ge-OCRd is
+  sample.sampleNumber ||= firstCapture(content, [/Monsternummer\s*:?\s*(\d{5,})/i]);
+  sample.pdfFieldName ||= firstCapture(content, [/Perceel\s*:?\s*([^\n]+)/i])?.split(' Datum')[0].trim();
+  sample.receivedDate ||= firstCapture(content, [/Datum ontvangst\s*:?\s*([^\n]+)/i]);
+  sample.reportDate ||= firstCapture(content, [/Datum verslag\s*:?\s*([^\n]+)/i]);
+
+  sample.measurements = extractMeasurementRows(lines);
+  sample.cystResult = extractCyst(lines);
 
   const warnings: string[] = [];
-  const sample: ParsedSample = { measurements: [] };
-
-  const content = lines.join('\n');
-  if (/HLB/i.test(content)) {
-    const labLine = lines.find((line) => /HLB/i.test(line));
-    if (labLine) {
-      // keep simple for MVP
-    }
-  }
-
-  sample.sampleNumber = firstMatch(content, [/Monsternummer\s*:?\s*(\d{6,})/i]);
-  sample.pdfFieldName = firstMatch(content, [
-    /Perceel\s*:?\s*([^\n]+)/i,
-    /Perceel\s*([A-Za-z0-9 .\-/]+)/i
-  ])?.split(' Datum')[0].trim();
-  sample.receivedDate = firstMatch(content, [/Datum ontvangst\s*:?\s*([^\n]+)/i]);
-  sample.reportDate = firstMatch(content, [/Datum verslag\s*:?\s*([^\n]+)/i]);
-
-  const measurementRows = extractMeasurementRows(lines);
-  sample.measurements = measurementRows;
-
-  const cyst = extractCyst(lines);
-  if (cyst) sample.cystResult = cyst;
-
   if (!sample.sampleNumber) warnings.push('sampleNumber niet gevonden');
   if (!sample.pdfFieldName) warnings.push('pdfFieldName niet gevonden');
   if (sample.measurements.length === 0) warnings.push('geen metingen gevonden');
 
   return {
-    labName: /HLB/i.test(content) ? 'HLB' : undefined,
+    labName: /\bHLB\b/i.test(content) ? 'HLB' : undefined,
     samples: [sample],
     warnings
   };
 }
 
-function firstMatch(input: string, patterns: RegExp[]): string | undefined {
+function normalizeLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function extractSimpleValue(lines: string[], linePattern: RegExp, capturePattern?: RegExp): string | undefined {
+  for (const line of lines) {
+    const base = line.match(linePattern);
+    if (!base?.[1]) continue;
+    const cleaned = base[1].trim();
+    if (!cleaned || cleaned === ':') continue;
+    if (!capturePattern) return cleaned;
+    const extracted = cleaned.match(capturePattern)?.[1];
+    if (extracted) return extracted.trim();
+  }
+  return undefined;
+}
+
+function firstCapture(input: string, patterns: RegExp[]): string | undefined {
   for (const p of patterns) {
     const m = input.match(p);
     if (m?.[1]) return m[1].trim();
@@ -101,44 +122,104 @@ function firstMatch(input: string, patterns: RegExp[]): string | undefined {
 
 function extractMeasurementRows(lines: string[]): ParsedMeasurement[] {
   const out: ParsedMeasurement[] = [];
-  for (const line of lines) {
-    if (!/[A-Za-z].*\d+$/.test(line)) continue;
-    if (/Monsternummer|Debiteurnummer|Datum ontvangst|Datum verslag|Soort monster|Cysteaaltjes|besmettingsgraad/i.test(line)) continue;
+  const seen = new Set<string>();
+  let currentCategory: string | undefined;
 
-    const match = line.match(/^(.+?)\s+(\d+(?:[\.,]\d+)?)\s*(\*{0,2})$/);
-    if (!match) continue;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
 
-    const analyte = cleanAnalyte(match[1]);
-    if (analyte.length < 3) continue;
+    const foundCategory = CATEGORY_WORDS.find((c) => new RegExp(`^${escapeRegex(c)}$`, 'i').test(line));
+    if (foundCategory) {
+      currentCategory = foundCategory;
+      continue;
+    }
 
-    const value = Number(match[2].replace(',', '.'));
-    if (Number.isNaN(value)) continue;
+    if (isNoiseLine(line)) continue;
 
-    out.push({ analyteKey: analyte, value, unit: 'aantal per 100 gram grond' });
+    // Case A: analyte + waarde op dezelfde regel
+    const sameLineMatch = line.match(/^(.+?)\s+(\d+(?:[\.,]\d+)?)\s*(\*{0,2})$/);
+    if (sameLineMatch) {
+      pushMeasurement(out, seen, {
+        analyteKey: cleanAnalyteName(sameLineMatch[1]),
+        value: parseNumeric(sameLineMatch[2]),
+        unit: 'aantal per 100 gram grond',
+        category: currentCategory
+      });
+      continue;
+    }
+
+    // Case B: analyte op regel i en waarde op regel i+1 (komt vaak voor bij OCR / geknipte kolommen)
+    const analyteCandidate = cleanAnalyteName(line);
+    if (looksLikeAnalyte(analyteCandidate) && i + 1 < lines.length) {
+      const nextLine = lines[i + 1];
+      const valueOnly = nextLine.match(/^(\d+(?:[\.,]\d+)?)\s*(\*{0,2})$/);
+      if (valueOnly) {
+        pushMeasurement(out, seen, {
+          analyteKey: analyteCandidate,
+          value: parseNumeric(valueOnly[1]),
+          unit: 'aantal per 100 gram grond',
+          category: currentCategory
+        });
+        i += 1;
+      }
+    }
   }
+
   return out;
 }
 
-function cleanAnalyte(input: string): string {
+function pushMeasurement(target: ParsedMeasurement[], seen: Set<string>, row: ParsedMeasurement) {
+  if (!row.analyteKey || Number.isNaN(row.value)) return;
+  if (!looksLikeAnalyte(row.analyteKey)) return;
+  const key = `${row.analyteKey}::${row.value}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  target.push(row);
+}
+
+function parseNumeric(raw: string): number {
+  return Number(raw.replace(',', '.'));
+}
+
+function looksLikeAnalyte(value: string): boolean {
+  if (value.length < 4) return false;
+  if (/Monsternummer|Debiteurnummer|Datum ontvangst|Datum verslag|Soort monster|Cysteaaltjes|besmettingsgraad|AALTJES ANALYSE|IBAN|BIC/i.test(value)) {
+    return false;
+  }
+  return /[A-Za-z]/.test(value);
+}
+
+function isNoiseLine(line: string): boolean {
+  return /Monsternummer|Debiteurnummer|Datum ontvangst|Datum verslag|Soort monster|Cysteaaltjes|besmettingsgraad|aantallen per|Een betrouwbare indicatie|AALTJES ANALYSE|research and consultancy|Kampweg|IBAN|BIC|K\.v\.K|BTW/i.test(line);
+}
+
+function cleanAnalyteName(input: string): string {
   return input
-    .replace(/Vrijlevende aaltjes|Wortellesieaaltjes|Wortelknobbelaaltjes|Vrijlevende wortelaaltjes|Stengelaaltjes|Overige plantparasitaire aaltjes|Niet plantparasitaire aaltjes/gi, '')
+    .replace(new RegExp(CATEGORY_WORDS.map(escapeRegex).join('|'), 'gi'), '')
     .replace(/[()]/g, '')
-    .replace(/spp\.?/gi, 'spp.')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 function extractCyst(lines: string[]): ParsedSample['cystResult'] | undefined {
   const idx = lines.findIndex((line) => /Cysteaaltjes/i.test(line));
   if (idx === -1) return undefined;
-  for (let i = idx + 1; i < Math.min(lines.length, idx + 8); i++) {
-    const m = lines[i].match(/([A-Za-z]+.*)\s+(\d+)\s+(\d+)\s+([A-Za-z ]+)/);
+
+  for (let i = idx; i < Math.min(lines.length, idx + 10); i++) {
+    const line = lines[i];
+    const m = line.match(/(?:Aardappelcysteaaltjes\s+)?(\d+)\s+(\d+)\s+([A-Za-z][A-Za-z ]+)/i);
     if (m) {
       return {
-        cystCount: Number(m[2]),
-        lleCount: Number(m[3]),
-        infestationGrade: m[4].trim()
+        cystCount: Number(m[1]),
+        lleCount: Number(m[2]),
+        infestationGrade: m[3].trim()
       };
     }
   }
+
   return undefined;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -41,6 +41,15 @@ describe('parseHlbAaltjesText', () => {
     expect(out.samples[0].measurements).toHaveLength(0);
     expect(out.warnings.length).toBeGreaterThan(0);
   });
+
+  it('filters out metadata rows that look like field names, dates or locations', () => {
+    const out = parseHlbAaltjesText(fixture('hlb-metadata-noise.txt'));
+    const measurements = out.samples[0].measurements;
+
+    expect(measurements).toHaveLength(1);
+    expect(measurements[0]).toMatchObject({ analyteKey: 'Pratylenchus penetrans', value: 245 });
+    expect(measurements.some((m) => /Smeerling|Veenhuizen/i.test(m.analyteKey))).toBe(false);
+  });
 });
 
 describe('parseDutchDate', () => {
